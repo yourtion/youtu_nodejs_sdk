@@ -2,7 +2,7 @@ var http = require('http');
 var https = require('https');
 var fs = require('fs');
 var conv = require('iconv-lite')
-
+var debug = require('debug')('YouTu:');
 
 var auth = require('./auth');
 var conf = require('./conf');
@@ -41,8 +41,8 @@ function  getrequest(protocol, params, callback) {
 
     return protocol.request(params, function(response) {
     
-        // console.log('STATUS: ' + response.statusCode);
-        // console.log('HEADERS: ' + JSON.stringify(response.headers));
+        debug('STATUS: ' + response.statusCode);
+        debug('HEADERS: ' + JSON.stringify(response.headers));
 
         if( response.statusCode  !=  200 ){
             callback({'httpcode':response.statusCode, 'code':response.statusCode , 'message':statusText(response.statusCode) , 'data':{}});
@@ -114,8 +114,8 @@ exports.detectface = function(imagePath,　isbigface, callback) {
         }
     };
     
-    //console.log(request_body);
-    //console.log(params);
+    // debug(request_body);
+    debug(params);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -131,7 +131,7 @@ exports.detectface = function(imagePath,　isbigface, callback) {
     
     // send the request body
     request.end(request_body);    
-    //console.log(request_body);
+    // debug(request_body);
 }
 
 
@@ -253,7 +253,7 @@ exports.facecompare = function(image_a, image_b, callback) {
         }                
     };
      
-    //console.log(request_body);
+    // debug(request_body);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -323,7 +323,7 @@ exports.faceverify = function(imagePath, person_id, callback) {
         }                
     };
         
-    //console.log(request_body);
+    // debug(request_body);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -592,7 +592,7 @@ exports.delperson= function(person_id, callback) {
         });
     }
     
-    //console.log(request_body);
+    // debug(request_body);
     var buffer = new Buffer(request_body, "UTF-8");
     var params = {
         hostname: conf.API_YOUTU_SERVER,
@@ -606,7 +606,7 @@ exports.delperson= function(person_id, callback) {
         }                
     };
 
-    //console.log(params);
+    debug(params);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -1014,8 +1014,8 @@ exports.fuzzydetect = function(imagePath,　callback) {
             'Content-Type': 'text/json'
         }
     };
-    //console.log(request_body);
-    //console.log(params);
+    // debug(request_body);
+    debug(params);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -1078,8 +1078,8 @@ exports.fooddetect = function(imagePath,　callback) {
             'Content-Type': 'text/json'
         }
     };
-    //console.log(request_body);
-    //console.log(params);
+    // debug(request_body);
+    debug(params);
     var request = null;
     if (conf.API_DOMAIN == 0)
     {
@@ -1142,8 +1142,8 @@ exports.imagetag = function(imagePath,　callback) {
             'Content-Type': 'text/json'
         }
     };
-    //console.log(request_body);
-    //console.log(params);
+    // debug(request_body);
+    debug(params);
     
     var request = null;
     if (conf.API_DOMAIN == 0)

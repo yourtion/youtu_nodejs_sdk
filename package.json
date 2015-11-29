@@ -24,6 +24,7 @@
     "node >= 0.4.7"
   ],
   "dependencies": {
-    "iconv-lite": "^0.4.13"
+    "iconv-lite": "^0.4.13",
+    "debug": "^2.2.0"
   }
 }
