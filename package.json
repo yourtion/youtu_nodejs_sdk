@@ -4,6 +4,7 @@
   "description": "node sdk for qcloud youtu",
   "main": "index.js",
   "scripts": {
+    "sample": "export DEBUG="YouTu:*" && node sample/sample.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
