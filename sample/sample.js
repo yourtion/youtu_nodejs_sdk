@@ -34,3 +34,13 @@ youtu.imagetag('a.jpg', function(data){
 });
 
 // 其他接口 类似
+//身份证OCR识别
+//youtu.idcardocr('sfz3.jpg',0,function(data){
+//    console.log("fuzzydetect:" + JSON.stringify(data));
+//})
+
+//身份证OCR识别
+//youtu.namecardocr('mp2.jpg',true,function(data){
+//    console.log("fuzzydetect:" + JSON.stringify(data));
+//})
+
