@@ -1227,3 +1227,69 @@ exports.idcardocr = function(imagePath, card_type, callback) {
   // send the request body
   request.end(request_body);
 }
+
+/**
+ * @brief namecardocr
+ * @param imagePath 待检测的路径（本地路径或url）
+ * @param retimage	是否需要返回处理结果图,true返回，false不返回
+ * @param callback 回调函数, 参见Readme 文档
+ */
+exports.namecardocr = function(imagePath, retimage, callback) {
+
+  callback = callback || function(ret){console.log(ret)};
+
+  var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
+  var sign  = auth.appSign(expired);
+  var tag = imagePath.substring(0,4);
+  var request_body = '';
+  if (tag == 'http')
+  {
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url : imagePath,
+      retimage  : retimage,
+    });
+  }
+  else
+  {
+    var data = fs.readFileSync(imagePath).toString('base64');
+    
+    if(data == null) {
+      callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
+      return;
+    };
+
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      image : data.toString('base64'),
+      retimage  : retimage,
+    });
+  }
+  var params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/ocrapi/namecardocr',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent'   : conf.USER_AGENT(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json'
+    }                
+  };
+    
+  var request = null;
+  if (conf.API_DOMAIN == 0)
+  {
+    request = getrequest(http, params, callback);
+  } 
+  else {
+    request = getrequest(https, params, callback);
+  }
+  
+  request.on('error', function(e) {
+     callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+  });
+
+  // send the request body
+  request.end(request_body);
+}
