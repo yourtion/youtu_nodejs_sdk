@@ -1161,3 +1161,69 @@ exports.imagetag = function(imagePath,　callback) {
     // send the request body
     request.end(request_body);    
 }
+
+/**
+ * @brief idcardocr
+ * @param imagePath 待检测的路径（本地路径或url）
+ * @param card_type	Int	身份证图片类型，0-正面，1-反面
+ * @param callback 回调函数, 参见Readme 文档
+ */
+exports.idcardocr = function(imagePath, card_type, callback) {
+
+  callback = callback || function(ret){console.log(ret)};
+
+  var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
+  var sign  = auth.appSign(expired);
+  var tag = imagePath.substring(0,4);
+  var request_body = '';
+  if (tag == 'http')
+  {
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url : imagePath,
+      card_type  : card_type,
+    });
+  }
+  else
+  {
+    var data = fs.readFileSync(imagePath).toString('base64');
+    
+    if(data == null) {
+      callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
+      return;
+    };
+
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      image : data.toString('base64'),
+      card_type  : card_type,
+    });
+  }
+  var params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/ocrapi/idcardocr',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent'   : conf.USER_AGENT(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json'
+    }                
+  };
+    
+  var request = null;
+  if (conf.API_DOMAIN == 0)
+  {
+    request = getrequest(http, params, callback);
+  } 
+  else {
+    request = getrequest(https, params, callback);
+  }
+  
+  request.on('error', function(e) {
+     callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+  });
+
+  // send the request body
+  request.end(request_body);
+}
