@@ -1,0 +1,2 @@
+export DEBUG=* 
+node sample/sample.js

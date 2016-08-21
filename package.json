@@ -1,7 +1,7 @@
 {
-  "name": "tencentyoutuyun",
+  "name": "youtusdk",
   "version": "1.0.0",
-  "description": "node sdk for qcloud youtu",
+  "description": "腾讯优图开放平台第三方SDK",
   "main": "index.js",
   "scripts": {
     "sample": "export DEBUG='YouTu:*' && node sample/sample.js",
@@ -9,18 +9,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TencentYouTu/nodejs_sdk.git"
+    "url": "https://github.com/yourtion/youtu_nodejs_sdk"
   },
   "keywords": [
     "qcloud",
     "youtu"
   ],
-  "author": "tencentyoutuyun",
+  "author": "YourtionGuo <yourtion@gmail.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/TencentYouTu/nodejs_sdk/issues"
+    "url": "https://github.com/yourtion/youtu_nodejs_sdk/issues"
   },
-  "homepage": "https://github.com/TencentYouTu/nodejs_sdk#readme",
+  "homepage": "https://github.com/yourtion/youtu_nodejs_sdk#readme",
   "engines": [
     "node >= 0.4.7"
   ],
