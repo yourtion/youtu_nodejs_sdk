@@ -3,17 +3,17 @@ var conf  = tencentyoutuyun.conf;
 var youtu = tencentyoutuyun.youtu;
 
 // 设置开发者和应用信息, 请填写你在开放平台
-var appid = '****';
-var secretId = '****';
-var secretKey = '****';
-var userid = '****';
+var appid = '1006920';
+var secretId = 'AKIDZ6O9LK4HfRgY1EAcJincpUu27iQdn99A';
+var secretKey = 'EU1TBKJfb0zRLFrpT7FuD0JMXBGIy2Yz';
+var userid = '1001';
 
 conf.setAppInfo(appid, secretId, secretKey, userid, 0)
 
 // 人脸检测 测试
-// youtu.detectface('a.jpg', 0, function(data){
-//     console.log("detectface:" + JSON.stringify(data));
-// });
+youtu.detectface('knowme.png', 0, function(data){
+    console.log("detectface:" + JSON.stringify(data));
+});
 
 // 人脸比对 测试
 // youtu.facecompare('a.jpg', 'a.jpg', function(data){
