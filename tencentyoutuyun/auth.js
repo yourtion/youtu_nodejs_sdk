@@ -1,42 +1,41 @@
-var crypto = require('crypto');
-var urlM = require('url');
-var conf = require('./conf');
+const crypto = require('crypto');
+const conf = require('./conf');
 
 exports.AUTH_PARAMS_ERROR = -1;
 exports.AUTH_SECRET_ID_KEY_ERROR = -2;
 
-exports.appSign = function(expired, userid) {
+exports.appSign = function (expired, userid) {
 
-    var secretId  = conf.SECRET_ID || '';
-    var secretKey = conf.SECRET_KEY || '';
-    var appid     = conf.APPID || '';
+  const secretId = conf.SECRET_ID || '';
+  const secretKey = conf.SECRET_KEY || '';
+  const appid = conf.APPID || '';
     
-    var pexpired  = expired || '';
-    var puserid   = userid || conf.USERID;
+  const pexpired = expired || '';
+  const puserid = userid || conf.USERID;
     
     
-    if (!pexpired || !puserid ) {
-        return module.exports.AUTH_PARAMS_ERROR;
-    }
+  if (!pexpired || !puserid) {
+    return module.exports.AUTH_PARAMS_ERROR;
+  }
     
-    if ( !secretId || !secretKey ) {
-        return module.exports.AUTH_SECRET_ID_KEY_ERROR;
-    }
+  if (!secretId || !secretKey) {
+    return module.exports.AUTH_SECRET_ID_KEY_ERROR;
+  }
     
-    var now            = parseInt(Date.now() / 1000);
-    var rdm            = parseInt(Math.random() * Math.pow(2, 32));
+  const now = parseInt(Date.now() / 1000, 10);
+  const rdm = parseInt(Math.random() * Math.pow(2, 32), 10);
     
-    // the order of every key is not matter verify
-    var plainText = 'a=' + appid + '&k=' + secretId + '&e=' + pexpired + '&t=' + now + '&r=' + rdm + '&u=' + puserid;
+  // the order of every key is not matter verify
+  const plainText = 'a=' + appid + '&k=' + secretId + '&e=' + pexpired + '&t=' + now + '&r=' + rdm + '&u=' + puserid;
         
-    var data = new Buffer(plainText,'utf8');
+  const data = new Buffer(plainText, 'utf8');
     
-    var res = crypto.createHmac('sha1',secretKey).update(data).digest();
+  const res = crypto.createHmac('sha1', secretKey).update(data).digest();
     
-    var bin = Buffer.concat([res,data]);
+  const bin = Buffer.concat([ res, data ]);
     
-    var sign = bin.toString('base64');
+  const sign = bin.toString('base64');
 
-    return sign;
-}
+  return sign;
+};
 

@@ -1,143 +1,120 @@
-var http = require('http');
-var https = require('https');
-var fs = require('fs');
-var conv = require('iconv-lite')
-var debug = require('debug')('YouTu:');
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const debug = require('debug')('YouTu:');
 
-var auth = require('./auth');
-var conf = require('./conf');
+const auth = require('./auth');
+const conf = require('./conf');
 
 // 30 days
-var EXPIRED_SECONDS = 2592000;
+const EXPIRED_SECONDS = 2592000;
+const cb = function (ret) {
+  console.log(ret);
+};
 
 /**
- * return the status message 
+ * return the status message
  */
 function statusText(status) {
+  switch (status) {
+  case 200:
+    return 'HTTP OK';
+  case 400:
+    return 'Bad Request';
+  case 401:
+    return 'Unauthorized';
+  case 403:
+    return 'Forbidden';
+  case 500:
+    return 'Internal Server Error';
+  default:
+    return 'unkown';
+  }
+}
 
-    var statusText = 'unkown';
-    
-    switch (status) {
-    case 200:
-      statusText = 'HTTP OK';
-      break;
-    case 400:
-      statusText = 'Bad Request';
-      break;
-    case 401:
-      statusText = 'Unauthorized';
-      break;
-    case 403:
-      statusText = 'Forbidden';
-      break;
-    case 500:
-      statusText = 'Internal Server Error';
-      break;
+function getrequest(protocol, params, callback) {
+
+  return protocol.request(params, function (response) {
+  
+    debug('STATUS: ' + response.statusCode);
+    debug('HEADERS: ' + JSON.stringify(response.headers));
+
+    if(response.statusCode !== 200) {
+      callback({ 'httpcode': response.statusCode, 'code': response.statusCode, 'message': statusText(response.statusCode), 'data': {}});
+      return;
     }
-    return statusText;
-};
 
-function  getrequest(protocol, params, callback) {
-
-    return protocol.request(params, function(response) {
+    let body = '';
+    response.setEncoding('utf8');
     
-        debug('STATUS: ' + response.statusCode);
-        debug('HEADERS: ' + JSON.stringify(response.headers));
+    response.on('data', function (chunk) {
+      body += chunk;
+    });
+    response.on('end', function (){
+      callback({ 'httpcode': response.statusCode, 'code': response.statusCode, 'message': statusText(response.statusCode), 'data': JSON.parse(body) });
+    });
 
-        if( response.statusCode  !=  200 ){
-            callback({'httpcode':response.statusCode, 'code':response.statusCode , 'message':statusText(response.statusCode) , 'data':{}});
-            return;
-        }
+    response.on('error', function (e){
+      callback({ 'httpcode': response.statusCode, 'code': response.statusCode, 'message': '' + e, 'data': {}});
+    });
+  });
+}
 
-        var body = '';
-        response.setEncoding('utf8');
-        
-        response.on('data', function (chunk) {
-            body += chunk;
-        });
-        response.on('end', function(){
-            callback({'httpcode':response.statusCode, 'code':response.statusCode , 'message':statusText(response.statusCode) , 'data':JSON.parse(body)});
-        });
-
-        response.on('error', function(e){
-            callback({'httpcode':response.statusCode, 'code':response.statusCode , 'message': '' + e , 'data':{} });
-        });
-    }); // 
-};
+function getFile(imagePath, callback) {
+  if(imagePath.substring(0, 4) === 'http') {
+    return callback(null, imagePath, true);
+  }
+  fs.readFile(imagePath, function (err, file) {
+    if(err) return callback(err);
+    callback(null, file.toString('base64'), false);
+  });
+}
 
 /**
  * @brief detectface
  * @param imagePath 待检测的路径（本地路径或url）
- * @param isbigface 是否大脸模式 ０表示检测所有人脸， 1表示只检测照片最大人脸　适合单人照模式
+ * @param isbigface 是否大脸模式 ０表示检测所有人脸, 1表示只检测照片最大人脸 适合单人照模式
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.detectface = function(imagePath,　isbigface, callback) {
+exports.detectface = function (imagePath, isbigface, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-            mode  : isbigface,
-        });
-    }
-    else
-    {
-        try {
-           var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-           callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-           return;
-        }
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-            mode  : isbigface,
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/detectface',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
+    
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      mode: isbigface,
+    });
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/detectface',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
     
     // debug(request_body);
     debug(params);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    }
-    
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
     
-    // send the request body
-    request.end(request_body);    
+    request.end(request_body);
     // debug(request_body);
-}
+  });
+};
 
 
 /**
@@ -146,69 +123,43 @@ exports.detectface = function(imagePath,　isbigface, callback) {
  * @param isbigface 是否大脸模式
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.faceshape = function(imagePath, isbigface, callback) {
+exports.faceshape = function (imagePath, isbigface, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-            mode  : isbigface,
-        });
-    }
-    else
-    {
-        try {
-           var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-           callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-           return;
-        }
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-            mode  : isbigface,
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/faceshape',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }                
-    };
-        
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    }
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      mode: isbigface,
+    });
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/faceshape',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
+    };
+    
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
 
     // send the request body
     request.end(request_body);
-}
+  });
+};
 
 
 /**
@@ -217,75 +168,52 @@ exports.faceshape = function(imagePath, isbigface, callback) {
  * @param image_b 待比对的B图片路径（本地路径或url）
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.facecompare = function(image_a, image_b, callback) {
+exports.facecompare = function (image_a, image_b, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = image_a.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        var request_body = JSON.stringify({
-            app_id: conf.APPID,
-            urlA : image_a,
-            urlB : image_b,
-        });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(image_a, function (err, data_a, url1) {
+    if(err) {
+      return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + image_a + ' not exists', 'data': {}});
     }
-    else
-    {
-        try {
-           var data_a = fs.readFileSync(image_a).toString('base64');
-           var data_b = fs.readFileSync(image_b).toString('base64');
-        } catch (e) {
-           callback({'httpcode':0, 'code':-1, 'message':'file ' + image_a + ' or ' + image_b + ' not exists', 'data':{}});
-           return;
-        }
+    getFile(image_b, function (err, data_b, url2) {
+      if(err) {
+        return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + image_b + ' not exists', 'data': {}});
+      }
 
-
-        
-        if(data_a == null || data_b == null ) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        var request_body = JSON.stringify({
-            app_id: conf.APPID,
-            imageA : data_a.toString('base64'),
-            imageB : data_b.toString('base64'),
-        });
-    }
-    
-    var params = {
+      const request_body = JSON.stringify({
+        app_id: conf.APPID,
+        urlA: url1 ? data_a : undefined,
+        imageA: !url1 ? data_a : undefined,
+        urlB: url1 ? data_b : undefined,
+        imageB: !url2 ? data_b : undefined,
+      });
+  
+      const params = {
         hostname: conf.API_YOUTU_SERVER,
         path: '/youtu/api/facecompare',
         method: 'POST',
         headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }                
-    };
-     
-    // debug(request_body);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-       
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+          'Authorization': sign,
+          'User-Agent': conf.getAgent(),
+          'Content-Length': request_body.length,
+          'Content-Type': 'text/json',
+        },
+      };
+   
+      const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
 
-    // send the request body
-    request.end(request_body);
-}
+      request.on('error', function (e) {
+        callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+      });
+
+      // send the request body
+      request.end(request_body);
+    });
+  });
+};
 
 
 /**
@@ -294,61 +222,47 @@ exports.facecompare = function(image_a, image_b, callback) {
  * @param image_url 待比对的B图片路径（url）
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.facecompare_file_url = function(image_file, image_url, callback) {
+exports.facecompare_file_url = function (image_file, image_url, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
 
-    try {
-        var data_a = fs.readFileSync(image_file).toString('base64');
-    } catch (e) {
-        callback({'httpcode':0, 'code':-1, 'message':'file ' + image_file + ' not exists', 'data':{}});
-        return;
+  getFile(image_file, function (err, data) {
+    if(err) {
+      return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + image_file + ' not exists', 'data': {}});
     }
-    
-    if(data_a == null ) {
-        callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-        return;
-    };
 
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        imageA : data_a.toString('base64'),
-        urlB   : image_url,
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      imageA: data,
+      urlB: image_url,
     });
 
-    
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/facecompare',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }                
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/facecompare',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
-     
-    //console.log(request_body);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-       
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+   
+    // console.log(request_body);
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
 
     // send the request body
     request.end(request_body);
-}
+  });
+};
 
 
 /**
@@ -357,75 +271,45 @@ exports.facecompare_file_url = function(image_file, image_url, callback) {
  * @param imagePath 待验证的图片路径（本地路径或url）
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.faceverify = function(imagePath, person_id, callback) {
+exports.faceverify = function (imagePath, person_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-            person_id : person_id,
-        });
-    }
-    else
-    {
-        try {
-            var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-            return;
-        }
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-            person_id : person_id,
-        });
-    }
-    
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/faceverify',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }                
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      person_id,
+    });
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/faceverify',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
-        
+    
     // debug(request_body);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-       
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
 
-    request.on('error', function(e) {
-             callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-        });
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+    });
 
     // send the request body
     request.end(request_body);
-        
-}
+  });
+};
 
 
 /**
@@ -434,73 +318,46 @@ exports.faceverify = function(imagePath, person_id, callback) {
  * @param imagePath 待识别的图片路径（本地路径或url）
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.faceidentify= function(imagePath, group_id, callback) {
+exports.faceidentify = function (imagePath, group_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-            group_id : group_id,
-        });
-    }
-    else
-    {
-        try {
-            var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-            return;
-        }
-        
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
 
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-            group_id : group_id,
-        });
-    }
-    
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/faceidentify',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }                
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      group_id,
+    });
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/faceidentify',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
-        
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-       
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+  
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
 
     // send the request body
     request.end(request_body);
-}
+  });
+};
 
 /**
  * @brief newperson
@@ -511,83 +368,49 @@ exports.faceidentify= function(imagePath, group_id, callback) {
  * @param persontag 人备注信息，用户自解释字段
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.newperson= function(imagePath, person_id, person_name, group_ids, persontag, callback) {
+exports.newperson = function (imagePath, person_id, person_name, group_ids, persontag, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-            person_id : person_id,
-            person_name: person_name,
-            group_ids : group_ids,
-            tag: persontag,
-        });
-    }
-    else
-    {
-        try {
-            var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-            return;
-        }
-        
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-            person_id : person_id,
-            person_name: person_name,
-            group_ids : group_ids,
-            tag: persontag,
-        });
-    }
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
 
-    var buffer = new Buffer(request_body, "UTF-8");
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      person_id,
+      person_name,
+      group_ids,
+      tag: persontag,
+    });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/newperson',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': buffer.length,
-            'Content-Type': 'text/json'
-        }                
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/api/newperson',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-    
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
-    
+  
     // send the request body
     request.end(request_body);
-}
+  });
+};
 
 
 /**
@@ -595,48 +418,40 @@ exports.newperson= function(imagePath, person_id, person_name, group_ids, person
  * @param person_id 待删除的个体id
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.delperson= function(person_id, callback) {
+exports.delperson = function (person_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        person_id : person_id,
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    person_id,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        port: conf.API_YOUTU_PORT,
-        path: '/youtu/api/delperson',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    port: conf.API_YOUTU_PORT,
+    path: '/youtu/api/delperson',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
- 
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    // send the request body
-    request.end(request_body);
-}
-
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -646,86 +461,74 @@ exports.delperson= function(person_id, callback) {
  * @param facetag 人脸备注信息，用户自解释字段
  * @param callback 回调函数, 参见Readme 文档
  */
- exports.addface = function(person_id, images, facetag, callback) {
+exports.addface = function (person_id, images, facetag, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var tag = images[0].substring(0,4);
-    var request_body = '';
-    
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            urls : images,
-            person_id : person_id,
-            tag : facetag
-        });
-    }
-    else
-    {
-        var image_bufs = new Array();
-    
-        for( var idx in images)
-        {
-            try {
-                var data =fs.readFileSync(images[idx]);
-            } catch (e) {
-                callback({'httpcode':0, 'code':-1, 'message':'file ' + images[idx] + ' not exists', 'data':{}});
-                return;
-            }
-            
-            if(data == null) {
-                callback({'httpcode':0, 'code':-1, 'message': images[idx] + ": read failed!", 'data':{}});
-                return;    
-            }
-
-           image_bufs[idx] = data.toString('base64');
-        }  
-    
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            images : image_bufs,
-            person_id : person_id,
-            tag : facetag
-        });
-    }
-    
-    // debug(request_body);
-    var buffer = new Buffer(request_body, "UTF-8");
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/addface',
-        method: 'POST',
-        headers: {
-        'Authorization': sign,
-        'User-Agent'   : conf.USER_AGENT(),
-        'Content-Length': buffer.length,
-        'Content-Type': 'text/json'
-        }                
-    };
-
-    debug(params);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
- 
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const tag = images[0].substring(0, 4);
+  let request_body = '';
+  let data;
+  if (tag === 'http') {
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      urls: images,
+      person_id,
+      tag: facetag,
     });
+  } else {
+    const image_bufs = [];
+    for(const idx in images) {
+      try {
+        data = fs.readFileSync(images[idx]);
+      } catch (e) {
+        callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + images[idx] + ' not exists', 'data': {}});
+        return;
+      }
+      
+      if(data == null) {
+        callback({ 'httpcode': 0, 'code': -1, 'message': images[idx] + ': read failed!', 'data': {}});
+        return;
+      }
 
-    // send the request body
-    request.end(request_body);
+      image_bufs[idx] = data.toString('base64');
+    }
+  
+    request_body = JSON.stringify({
+      app_id: conf.APPID,
+      images: image_bufs,
+      person_id,
+      tag: facetag,
+    });
+  }
+  
+  // debug(request_body);
+  const buffer = new Buffer(request_body, 'UTF-8');
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/addface',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': buffer.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-}
+  debug(params);
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
+
+  // send the request body
+  request.end(request_body);
+
+};
 
  
 /**
@@ -734,47 +537,40 @@ exports.delperson= function(person_id, callback) {
  * @param face_ids 待删除的人脸id 数组
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.delface = function(person_id, face_ids, callback) {
+exports.delface = function (person_id, face_ids, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        face_ids: face_ids,
-        person_id : person_id,
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    face_ids,
+    person_id,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/delface',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/delface',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    }
-     
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    // send the request body
-    request.end(request_body);
-}
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -784,51 +580,41 @@ exports.delface = function(person_id, face_ids, callback) {
  * @param tag 新设置的人脸备注信息
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.setinfo = function(person_name, person_id, tag, callback) {
+exports.setinfo = function (person_name, person_id, tag, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        person_name: person_name,
-        person_id : person_id,
-        tag: tag,
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    person_name,
+    person_id,
+    tag,
+  });
 
-    var buffer = new Buffer(request_body, "UTF-8");
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/setinfo',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': buffer.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/setinfo',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-       request = getrequest(http, params, callback);
-    } 
-    else {
-       request = getrequest(https, params, callback);
-    } 
- 
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    // send the request body
-    request.end(request_body);
-}
-
-
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -836,93 +622,77 @@ exports.setinfo = function(person_name, person_id, tag, callback) {
  * @param person_id 待查询的个体身份id
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.getinfo = function(person_id, callback) {
+exports.getinfo = function (person_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        person_id : person_id,
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/getinfo',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    person_id,
+  });
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
- 
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/getinfo',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    // send the request body
-    request.end(request_body);
-}
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
+
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
  * @brief getgroupids
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.getgroupids = function(callback) {
+exports.getgroupids = function (callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/getgroupids',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/getgroupids',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    }
-     
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
-
-    // send the request body
-    request.end(request_body);
-}
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -930,50 +700,41 @@ exports.getgroupids = function(callback) {
  * @param group_id 待查询的组id
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.getpersonids = function(group_id, callback) {
+exports.getpersonids = function (group_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        group_id:group_id
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    group_id,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        port: conf.API_YOUTU_PORT,
-        path: '/youtu/api/getpersonids',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    port: conf.API_YOUTU_PORT,
+    path: '/youtu/api/getpersonids',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
-
-    // send the request body
-    request.end(request_body);
-}
-
-
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -981,48 +742,40 @@ exports.getpersonids = function(group_id, callback) {
  * @param person_id 待查询的个体id
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.getfaceids = function(person_id, callback) {
+exports.getfaceids = function (person_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        person_id:person_id
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    person_id,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/getfaceids',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/getfaceids',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    }  
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
  
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    // send the request body
-    request.end(request_body);
-}
-
+  // send the request body
+  request.end(request_body);
+};
 
 
 /**
@@ -1030,255 +783,173 @@ exports.getfaceids = function(person_id, callback) {
  * @param face_id 待查询的人脸id
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.getfaceinfo = function(face_id, callback) {
+exports.getfaceinfo = function (face_id, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    
-    var request_body = JSON.stringify({
-        app_id: conf.APPID,
-        face_id:face_id
-    });
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  
+  const request_body = JSON.stringify({
+    app_id: conf.APPID,
+    face_id,
+  });
 
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/api/getfaceinfo',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
+  const params = {
+    hostname: conf.API_YOUTU_SERVER,
+    path: '/youtu/api/getfaceinfo',
+    method: 'POST',
+    headers: {
+      'Authorization': sign,
+      'User-Agent': conf.getAgent(),
+      'Content-Length': request_body.length,
+      'Content-Type': 'text/json',
+    },
+  };
 
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
+  const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
  
-    request.on('error', function(e) {
-         callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-    });
+  request.on('error', function (e) {
+    callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+  });
 
-    // send the request body
-    request.end(request_body);
-}
+  // send the request body
+  request.end(request_body);
+};
 
 /**
  * @brief fuzzydetect
  * @param imagePath 待检测的路径
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.fuzzydetect = function(imagePath,　callback) {
+exports.fuzzydetect = function (imagePath, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-        });
-    }
-    else
-    {
-        try {
-             var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-             callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-             return;
-        }
-        
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
+    
 
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/imageapi/fuzzydetect',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+    });
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/imageapi/fuzzydetect',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
     // debug(request_body);
     debug(params);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-        
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
-    
+  
     // send the request body
-    request.end(request_body);    
-}
+    request.end(request_body);
+  });
+};
 
 /**
  * @brief fooddetect
  * @param imagePath 待检测的路径
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.fooddetect = function(imagePath,　callback) {
+exports.fooddetect = function (imagePath, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-        });
-    }
-    else
-    {
-        
-        try {
-             var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-             callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-             return;
-        }
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
 
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/imageapi/fooddetect',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+    });
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/imageapi/fooddetect',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
     // debug(request_body);
     debug(params);
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-        
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
-    
+  
     // send the request body
-    request.end(request_body);    
-}
+    request.end(request_body);
+  });
+};
 
 /**
  * @brief imagetag
  * @param imagePath 待检测的路径
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.imagetag = function(imagePath,　callback) {
+exports.imagetag = function (imagePath, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-        });
-    }
-    else
-    {
-        try {
-             var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-             callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-             return;
-        }
-        
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/imageapi/imagetag',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
+    
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+    });
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/imageapi/imagetag',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
     };
     // debug(request_body);
     debug(params);
-    
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-        
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+  
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
     });
-    
+  
     // send the request body
-    request.end(request_body);    
-}
+    request.end(request_body);
+  });
+};
 
 /**
  * @brief idcardocr
@@ -1286,134 +957,88 @@ exports.imagetag = function(imagePath,　callback) {
  * @param card_type	Int	身份证图片类型，0-正面，1-反面
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.idcardocr = function(imagePath, card_type, callback) {
+exports.idcardocr = function (imagePath, card_type, callback) {
 
-  callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-  var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-  var sign  = auth.appSign(expired);
-  var tag = imagePath.substring(0,4);
-  var request_body = '';
-  if (tag == 'http')
-  {
-    request_body = JSON.stringify({
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
+
+    const request_body = JSON.stringify({
       app_id: conf.APPID,
-      url : imagePath,
-      card_type  : card_type,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      card_type,
     });
-  }
-  else
-  {
-    var data = fs.readFileSync(imagePath).toString('base64');
-    
-    if(data == null) {
-      callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-      return;
-    };
-
-    request_body = JSON.stringify({
-      app_id: conf.APPID,
-      image : data.toString('base64'),
-      card_type  : card_type,
-    });
-  }
-  var params = {
-    hostname: conf.API_YOUTU_SERVER,
-    path: '/youtu/ocrapi/idcardocr',
-    method: 'POST',
-    headers: {
-      'Authorization': sign,
-      'User-Agent'   : conf.USER_AGENT(),
-      'Content-Length': request_body.length,
-      'Content-Type': 'text/json'
-    }                
-  };
-    
-  var request = null;
-  if (conf.API_DOMAIN == 0)
-  {
-    request = getrequest(http, params, callback);
-  } 
-  else {
-    request = getrequest(https, params, callback);
-  }
   
-  request.on('error', function(e) {
-     callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-  });
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/ocrapi/idcardocr',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
+    };
+  
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
 
-  // send the request body
-  request.end(request_body);
-}
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+    });
+
+    // send the request body
+    request.end(request_body);
+  });
+};
 
 /*
  * @brief imageporn
  * @param imagePath 待检测的路径
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.imageporn = function(imagePath,　callback) {
+exports.imageporn = function (imagePath, callback) {
 
-    callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            url : imagePath,
-        });
-    }
-    else
-    {
-        try {
-             var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-             callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-             return;
-        }
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
-
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            image : data.toString('base64'),
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/imageapi/imageporn',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
-    //console.log(request_body);
-    //console.log(params);
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-        
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
     });
-    
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/imageapi/imageporn',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
+    };
+  
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+    });
+  
     // send the request body
-    request.end(request_body);    
-}
+    request.end(request_body);
+  });
+};
 
 
 /**
@@ -1422,71 +1047,44 @@ exports.imageporn = function(imagePath,　callback) {
  * @param cardType 0 代表输入图像是身份证正面， 1代表输入是身份证反面
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.idcardocr = function(imagePath,　cardType, callback) {
-    
-    callback = callback || function(ret){console.log(ret)};
+exports.idcardocr = function (imagePath, cardType, callback) {
+  
+  callback = callback || cb;
 
-    var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-    var sign  = auth.appSign(expired);
-    var tag = imagePath.substring(0,4);
-    var request_body = '';
-    if (tag == 'http')
-    {
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            card_type: cardType,
-            url : imagePath,
-        });
-    }
-    else
-    {
-        try {
-             var data = fs.readFileSync(imagePath).toString('base64');
-        } catch (e) {
-             callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists', 'data':{}});
-             return;
-        }
-        if(data == null) {
-            callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-            return;
-        };
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
 
-        request_body = JSON.stringify({
-            app_id: conf.APPID,
-            card_type: cardType,
-            image : data.toString('base64'),
-        });
-    }
-    var params = {
-        hostname: conf.API_YOUTU_SERVER,
-        path: '/youtu/ocrapi/idcardocr',
-        method: 'POST',
-        headers: {
-            'Authorization': sign,
-            'User-Agent'   : conf.USER_AGENT(),
-            'Content-Length': request_body.length,
-            'Content-Type': 'text/json'
-        }
-    };
-    //console.log(request_body);
-    //console.log(params);
-    
-    var request = null;
-    if (conf.API_DOMAIN == 0)
-    {
-        request = getrequest(http, params, callback);
-    } 
-    else {
-        request = getrequest(https, params, callback);
-    } 
-        
-    request.on('error', function(e) {
-        callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
+    const request_body = JSON.stringify({
+      app_id: conf.APPID,
+      card_type: cardType,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
     });
-    
+  
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/ocrapi/idcardocr',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
+    };
+  
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
+  
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+    });
+  
     // send the request body
-    request.end(request_body); 
-}
+    request.end(request_body);
+  });
+};
 
 /**
  * @brief namecardocr
@@ -1494,62 +1092,42 @@ exports.idcardocr = function(imagePath,　cardType, callback) {
  * @param retimage	是否需要返回处理结果图,true返回，false不返回
  * @param callback 回调函数, 参见Readme 文档
  */
-exports.namecardocr = function(imagePath, retimage, callback) {
+exports.namecardocr = function (imagePath, retimage, callback) {
 
-  callback = callback || function(ret){console.log(ret)};
+  callback = callback || cb;
 
-  var expired = parseInt(Date.now() / 1000) + EXPIRED_SECONDS;
-  var sign  = auth.appSign(expired);
-  var tag = imagePath.substring(0,4);
-  var request_body = '';
-  if (tag == 'http')
-  {
-    request_body = JSON.stringify({
-      app_id: conf.APPID,
-      url : imagePath,
-      retimage  : retimage,
-    });
-  }
-  else
-  {
-    var data = fs.readFileSync(imagePath).toString('base64');
+  const expired = parseInt(Date.now() / 1000, 10) + EXPIRED_SECONDS;
+  const sign = auth.appSign(expired);
+  getFile(imagePath, function (err, data, url) {
+    if(err) return callback({ 'httpcode': 0, 'code': -1, 'message': 'file ' + imagePath + ' not exists', 'data': {}});
     
-    if(data == null) {
-      callback({'httpcode':0, 'code':-1, 'message':'file ' + imagePath + ' not exists or params error', 'data':{}});
-      return;
-    };
 
-    request_body = JSON.stringify({
+    const request_body = JSON.stringify({
       app_id: conf.APPID,
-      image : data.toString('base64'),
-      retimage  : retimage,
+      url: url ? data : undefined,
+      image: !url ? data : undefined,
+      retimage,
     });
-  }
-  var params = {
-    hostname: conf.API_YOUTU_SERVER,
-    path: '/youtu/ocrapi/namecardocr',
-    method: 'POST',
-    headers: {
-      'Authorization': sign,
-      'User-Agent'   : conf.USER_AGENT(),
-      'Content-Length': request_body.length,
-      'Content-Type': 'text/json'
-    }                
-  };
-    
-  var request = null;
-  if (conf.API_DOMAIN == 0)
-  {
-    request = getrequest(http, params, callback);
-  } 
-  else {
-    request = getrequest(https, params, callback);
-  }
   
-  request.on('error', function(e) {
-     callback({'httpcode': 0, 'code': 0, 'message':e.message, 'data': {}});
-  });
+    const params = {
+      hostname: conf.API_YOUTU_SERVER,
+      path: '/youtu/ocrapi/namecardocr',
+      method: 'POST',
+      headers: {
+        'Authorization': sign,
+        'User-Agent': conf.getAgent(),
+        'Content-Length': request_body.length,
+        'Content-Type': 'text/json',
+      },
+    };
+  
+    const request = conf.API_DOMAIN === 0 ? getrequest(http, params, callback) : getrequest(https, params, callback);
 
-  // send the request body
-  request.end(request_body);
-}
+    request.on('error', function (e) {
+      callback({ 'httpcode': 0, 'code': 0, 'message': e.message, 'data': {}});
+    });
+
+    // send the request body
+    request.end(request_body);
+  });
+};
